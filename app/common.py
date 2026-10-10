@@ -1,6 +1,7 @@
 """Cached data access and shared chart helpers for the Streamlit pages."""
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -82,7 +83,41 @@ def county_geojson() -> dict | None:
 def county_loans(county_fips: str, year: int = LATEST_YEAR) -> pd.DataFrame:
     """Loan-level rows with city attached; downloads from HMDA on first use."""
     loans = hmda.fetch_county_loans(county_fips, year)
+    loans["year"] = loans["year"].astype(int)
     return metrics.attach_city(loans, tract_city())
+
+
+@st.cache_data(show_spinner=False)
+def metros() -> pd.DataFrame | None:
+    return _read_optional("metros.parquet")
+
+
+@st.cache_data(show_spinner=False)
+def lenders() -> pd.DataFrame | None:
+    return _read_optional("lenders.parquet")
+
+
+@st.cache_data(show_spinner=False)
+def territory_loans(county_fips_list: tuple[str, ...], years: tuple[int, ...]) -> pd.DataFrame:
+    """Loan records for every county-year in a territory, downloaded in parallel on first use."""
+    jobs = [(fips, year) for year in years for fips in county_fips_list]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        frames = list(pool.map(lambda job: hmda.fetch_county_loans(*job), jobs))
+    loans = pd.concat(frames, ignore_index=True)
+    loans["year"] = loans["year"].astype(int)  # caches written before the int fix store text
+    return metrics.attach_city(loans, tract_city())
+
+
+def data_as_of() -> str:
+    """One-line freshness stamp so advisers know how current each source is."""
+    parts = [f"HMDA loans: {LATEST_YEAR} (published annually, ~1 year lag)"]
+    county_market = market_county()
+    if county_market is not None:
+        parts.append(f"Redfin market: {county_market['period_end'].max():%b %Y}")
+    rates = mortgage_rates()
+    if rates is not None:
+        parts.append(f"30y rate: {rates['date'].max():%b %d, %Y}")
+    return " · ".join(parts)
 
 
 def load_county_loans_with_feedback(county_fips: str, county_label: str) -> pd.DataFrame | None:
@@ -211,6 +246,8 @@ def render_insights(items: list[Insight], empty_message: str = "No notable signa
             st.write(item.detail)
             if item.drivers:
                 st.markdown("**Why:**\n" + "\n".join(f"- {driver}" for driver in item.drivers))
+            if item.action:
+                st.markdown(f"👉 **What to do:** {item.action}")
 
 
 def data_footnote() -> None:

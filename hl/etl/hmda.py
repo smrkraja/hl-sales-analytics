@@ -17,6 +17,7 @@ PURPOSE_CODES = ",".join(str(code) for code in PURPOSE_TO_PRODUCT)
 LOAN_COLUMNS = {
     "activity_year": "year",
     "lei": "lender_lei",
+    "derived_msa-md": "metro_code",
     "census_tract": "tract",
     "county_code": "county_fips",
     "loan_purpose": "loan_purpose",
@@ -30,6 +31,9 @@ LOAN_COLUMNS = {
     "loan_term": "loan_term_months",
     "occupancy_type": "occupancy",
     "derived_loan_product_type": "loan_type",
+    "lien_status": "lien",
+    "tract_to_msa_income_percentage": "tract_income_pct",
+    "tract_minority_population_percent": "tract_minority_pct",
 }
 OCCUPANCY = {1: "Primary residence", 2: "Second home", 3: "Investment"}
 
@@ -96,10 +100,14 @@ def clean_loans(raw: pd.DataFrame) -> pd.DataFrame:
     loans["product"] = loans["loan_purpose"].map(PURPOSE_TO_PRODUCT)
     loans = loans[loans["product"].notna()].copy()
     # HMDA uses "Exempt"/"NA" strings in numeric columns; treat them as missing.
-    for column in ["loan_amount", "interest_rate", "property_value", "ltv", "income_k", "loan_term_months"]:
+    numeric_columns = ["loan_amount", "interest_rate", "property_value", "ltv", "income_k", "loan_term_months",
+                       "lien", "tract_income_pct", "tract_minority_pct"]
+    for column in numeric_columns:
         loans[column] = pd.to_numeric(loans[column], errors="coerce")
     loans["open_end"] = pd.to_numeric(loans["open_end"], errors="coerce").eq(1)
     loans["occupancy"] = pd.to_numeric(loans["occupancy"], errors="coerce").map(OCCUPANCY)
+    loans["metro_code"] = loans["metro_code"].astype("string")
+    loans["year"] = pd.to_numeric(loans["year"]).astype(int)
     loans["loan_id"] = loans["county_fips"] + "-" + loans["year"].astype(str) + "-" + pd.RangeIndex(len(loans)).astype(str)
     return loans.reset_index(drop=True)
 
@@ -117,9 +125,22 @@ def fetch_county_loans(county_fips: str, year: int) -> pd.DataFrame:
     return loans
 
 
+def fetch_lenders(years: list[int]) -> pd.DataFrame:
+    """LEI -> institution name for every HMDA filer in the given years."""
+    frames = []
+    for year in years:
+        institutions = get_with_retry(f"{HMDA_API}/filers", {"years": year}).json()["institutions"]
+        frames.append(pd.DataFrame(institutions)[["lei", "name"]])
+    return pd.concat(frames).drop_duplicates("lei", keep="last").rename(columns={"lei": "lender_lei", "name": "lender"})
+
+
 def run(years: list[int], states: list[str], include_counties: bool = True) -> None:
-    print(f"hmda: state aggregates for {len(states)} states x {len(years)} years")
-    build_state_aggregates(years, states).to_parquet(DATA_DIR / "state_products.parquet", index=False)
+    print("hmda: lender names")
+    fetch_lenders(years).to_parquet(DATA_DIR / "lenders.parquet", index=False)
+    # State totals are cheap (~150 calls), so always load all of them; `states` only limits the
+    # slow per-county step. Keeps the national overview complete on a quick partial load.
+    print(f"hmda: state aggregates for {len(ALL_STATE_ABBRS)} states x {len(years)} years")
+    build_state_aggregates(years, ALL_STATE_ABBRS).to_parquet(DATA_DIR / "state_products.parquet", index=False)
     if include_counties:
         counties = pd.read_parquet(DATA_DIR / "counties.parquet")
         counties = counties[counties["state"].isin(states)]

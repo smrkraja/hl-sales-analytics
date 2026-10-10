@@ -6,4 +6,5 @@ requests==2.34.2
 feedparser==6.0.14
 python-dotenv==1.2.4
 anthropic==1.13.0
+Authlib==1.8.0
 pytest==9.1.1

@@ -36,6 +36,25 @@ class Insight:
     detail: str
     product: str | None = None
     drivers: list[str] = field(default_factory=list)
+    action: str | None = None  # the concrete next step for an adviser
+
+
+# Next step per (product, direction) when an area's mix skews from its benchmark.
+MIX_ACTIONS = {
+    ("Purchase", "high"): "Prioritise purchase pre-approvals and realtor/builder partnerships here.",
+    ("Purchase", "low"): "Purchase demand is soft - lean on refi and HELOC outreach to existing owners.",
+    ("Refinance", "high"): "Call recent high-rate borrowers with a refinance quote (see the Refi opportunity tab).",
+    ("Refinance", "low"): "Few owners benefit from refinancing now - shift effort to purchase and HELOC.",
+    ("Cash-out Refi", "high"): "Offer cash-out quotes alongside a HELOC comparison so borrowers can keep their first-lien rate.",
+    ("Cash-out Refi", "low"): "Position HELOCs instead - owners are reluctant to give up low first-lien rates.",
+    ("Home Equity", "high"): "Lead with HELOC offers to existing owners with 20%+ equity.",
+    ("Home Equity", "low"): "Check whether equity or state rules limit HELOCs before investing in campaigns here.",
+}
+REGIME_ACTIONS = {
+    "Buyer's market": "Target move-up buyers and sellers who need bridge or purchase financing; watch LTV on recent loans.",
+    "Seller's market": "Win on speed: fully underwritten pre-approvals and fast closings beat competing offers.",
+    "Balanced": "Track rates and local job news - they will tip this market either way.",
+}
 
 
 def _pct(value: float) -> str:
@@ -109,6 +128,7 @@ def mix_insights(area: str, area_shares: dict, benchmark: str, benchmark_shares:
             title=f"{product} is {_pct(area_shares[product])} of loans in {area} vs {_pct(benchmark_shares[product])} in {benchmark}",
             detail=f"{abs(gap) * 100:.1f} pts {'above' if gap > 0 else 'below'} {benchmark}",
             drivers=drivers,
+            action=MIX_ACTIONS[(product, direction)],
         ))
     return insights
 
@@ -123,6 +143,8 @@ def yoy_insights(area: str, changes: dict, year: int) -> list[Insight]:
             area=area, product=product,
             title=f"{product} originations {'up' if change > 0 else 'down'} {_pct(abs(change))} in {year} vs {year - 1}",
             detail=f"Year-over-year change in {area}.",
+            action=(f"Add {product.lower()} capacity and marketing while demand is growing." if change > 0
+                    else f"Check whether the drop is market-wide or lost share (see Market share)."),
         ))
     return insights
 
@@ -153,7 +175,7 @@ def regime_insight(area: str, shift: dict | None) -> Insight | None:
         kind = "info"
     detail = (f"Months of supply {shift['months_of_supply_prev']:.1f} -> {shift['months_of_supply']:.1f}. "
               + REGIME_IMPLICATIONS[shift["current"]])
-    return Insight(kind=kind, area=area, title=title, detail=detail)
+    return Insight(kind=kind, area=area, title=title, detail=detail, action=REGIME_ACTIONS[shift["current"]])
 
 
 def news_insight(area: str, counts: dict, sample_titles: dict[str, list[str]]) -> list[Insight]:
@@ -164,6 +186,7 @@ def news_insight(area: str, counts: dict, sample_titles: dict[str, list[str]]) -
             title=f"Employer inflow signals in {area} - expect purchase volume to rise",
             detail=f"{counts['Inflow']} recent headlines about relocations, new facilities or hiring.",
             drivers=sample_titles.get("Inflow", [])[:3],
+            action="Contact HR/relocation teams at the arriving employers about relocation mortgage programs.",
         ))
     if counts.get("Outflow", 0) >= NEWS_SIGNAL_MIN:
         insights.append(Insight(
@@ -171,6 +194,7 @@ def news_insight(area: str, counts: dict, sample_titles: dict[str, list[str]]) -
             title=f"Employer outflow signals in {area} - expect more listings and watch credit stress",
             detail=f"{counts['Outflow']} recent headlines about layoffs, closures or exits.",
             drivers=sample_titles.get("Outflow", [])[:3],
+            action="Prepare hardship options for affected borrowers; expect listings - pitch move-up buyers.",
         ))
     return insights
 
@@ -180,11 +204,13 @@ def rate_insight(rates: dict) -> Insight | None:
     if change <= -RATE_MOVE_THRESHOLD:
         return Insight(kind="opportunity", area="National", product="Refinance",
                        title=f"30y rate down {abs(change):.2f} pts in a year (now {rates['rate']:.2f}%)",
-                       detail="Borrowers who locked in at the peak are now in the money - run refi outreach on 2023-24 vintages.")
+                       detail="Borrowers who locked in at the peak are now in the money.",
+                       action="Run refi outreach on 2023-24 vintages (see the Refi opportunity tab).")
     if change >= RATE_MOVE_THRESHOLD:
         return Insight(kind="opportunity", area="National", product="Home Equity",
                        title=f"30y rate up {change:.2f} pts in a year (now {rates['rate']:.2f}%)",
-                       detail="Cash-out refi gets expensive; HELOCs let owners keep their low first-lien rate.")
+                       detail="Cash-out refi gets expensive; HELOCs let owners keep their low first-lien rate.",
+                       action="Lead equity conversations with HELOCs rather than cash-out refinances.")
     return Insight(kind="info", area="National",
                    title=f"30y rate steady at {rates['rate']:.2f}% ({change:+.2f} pts YoY)",
                    detail="Rate-driven refi demand is unlikely to change sharply.")
@@ -209,8 +235,55 @@ def compare_cities(city_shares: dict[str, dict], profiles: dict[str, dict]) -> l
                    f"than {laggard} ({_pct(city_shares[laggard][product])})"),
             detail=f"{gap * 100:.1f} pt gap in share of loans ({relative_gap:.0%} higher relative to {laggard}).",
             drivers=drivers,
+            action=f"Weight {product.lower()} campaigns toward {leader}.",
         ))
     return insights
+
+
+def refi_pool_insight(area: str, pool_loans: int, pool_volume: float, median_savings: float,
+                      market_rate: float) -> Insight | None:
+    if pool_loans == 0:
+        return Insight(kind="info", area=area, product="Refinance",
+                       title=f"No loans in {area} are 0.75+ pts above today's {market_rate:.2f}% rate",
+                       detail="Refinance demand will stay low unless rates fall.",
+                       action="Use the rate scenario slider to size the pool if rates drop.")
+    return Insight(
+        kind="opportunity", area=area, product="Refinance",
+        title=f"{pool_loans:,} loans (${pool_volume / 1e6:,.0f}M) in {area} could refinance at {market_rate:.2f}%",
+        detail=f"Median estimated saving ${median_savings:,.0f}/month per borrower.",
+        action="Export the in-the-money list and start with the largest monthly savings.",
+    )
+
+
+def share_gap_insight(bank: str, positions: list[dict]) -> Insight | None:
+    """Flag the product where the bank's share lags its overall share the most."""
+    overall = next((row for row in positions if row["product"] == "All products"), None)
+    products = [row for row in positions if row["product"] != "All products" and row["market_loans"] >= 100]
+    if not overall or not overall["share"] or not products:
+        return None
+    weakest = min(products, key=lambda row: row["share"] / overall["share"])
+    if weakest["share"] >= overall["share"] * 0.75:
+        return None
+    rank = f"rank #{weakest['rank']}" if weakest["rank"] else "no loans"
+    return Insight(
+        kind="watch", area=bank, product=weakest["product"],
+        title=f"{bank} is under-indexed in {weakest['product']}: {_pct(weakest['share'])} share vs {_pct(overall['share'])} overall",
+        detail=f"{rank} of {weakest['lenders']} lenders; the leader holds {_pct(weakest['leader_share'])}.",
+        action=f"Compare {weakest['product'].lower()} pricing, turn times and referral sources with the top lenders.",
+    )
+
+
+def fair_lending_insight(bank: str, coverage: list[dict]) -> Insight | None:
+    flagged = [row for row in coverage if row["needs_review"]]
+    if not flagged:
+        return None
+    gaps = "; ".join(f"{row['segment']}: {_pct(row['bank_share'])} of {bank}'s loans vs {_pct(row['peer_share'])} for peers"
+                     for row in flagged)
+    return Insight(
+        kind="watch", area=bank, title=f"Fair-lending review: {bank} under-represented in {', '.join(r['segment'] for r in flagged)}",
+        detail=gaps + ".",
+        action="Review with Compliance before launching targeted campaigns; make sure outreach covers the whole territory.",
+    )
 
 
 def _profile_drivers(product: str, leader: dict, laggard: dict, leader_name: str, laggard_name: str) -> list[str]:

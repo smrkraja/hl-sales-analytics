@@ -17,6 +17,8 @@ from hl.etl.http import get_with_retry
 COUNTY_URL = "https://www2.census.gov/geo/docs/reference/codes2020/national_county2020.txt"
 PLACE_URL = "https://www2.census.gov/geo/docs/reference/codes2020/national_place2020.txt"
 BAF_URL = "https://www2.census.gov/geo/docs/maps-data/data/baf2020/BlockAssign_ST{fips}_{abbr}.zip"
+# OMB CBSA delineation as CSV (NBER mirror of the Census list1 file).
+METRO_CROSSWALK_URL = "https://data.nber.org/cbsa-csa-fips-county-crosswalk/2023/cbsa2fipsxw_2023.csv"
 COUNTY_GEOJSON_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
 # A tract counts as "in" a city only if most of its blocks are; otherwise it is
@@ -90,6 +92,25 @@ def build_tract_city(counties: pd.DataFrame, places: pd.DataFrame) -> pd.DataFra
     return tracts[["tract", "county_fips", "state", "city"]]
 
 
+def load_metros() -> pd.DataFrame:
+    """County -> metro, keyed the way HMDA's derived_msa-md is: the metropolitan
+    division code where one exists (e.g. Dallas vs Fort Worth), else the CBSA code."""
+    text = get_with_retry(METRO_CROSSWALK_URL).text
+    crosswalk = pd.read_csv(io.StringIO(text), dtype=str)
+    crosswalk = crosswalk[crosswalk["metropolitanmicropolitanstatis"] == "Metropolitan Statistical Area"]
+    has_division = crosswalk["metropolitandivisioncode"].fillna("") != ""
+    return pd.DataFrame({
+        "county_fips": crosswalk["county_fips"].str.zfill(5),
+        "metro_code": crosswalk["metropolitandivisioncode"].where(has_division, crosswalk["cbsacode"]),
+        "metro_name": crosswalk["metropolitandivisiontitle"].where(has_division, crosswalk["cbsatitle"]),
+    }).reset_index(drop=True)
+
+
+def run_metros() -> None:
+    print("geo: county -> metro crosswalk")
+    load_metros().to_parquet(DATA_DIR / "metros.parquet", index=False)
+
+
 def run() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     print("geo: counties and places")
@@ -100,3 +121,4 @@ def run() -> None:
     build_tract_city(counties, places).to_parquet(DATA_DIR / "tract_city.parquet", index=False)
     print("geo: county boundaries")
     (DATA_DIR / "counties.geojson").write_bytes(get_with_retry(COUNTY_GEOJSON_URL).content)
+    run_metros()

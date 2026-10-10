@@ -184,3 +184,18 @@ def test_compare_cities_uses_relative_gap_for_small_products():
     }
     found = {item.product for item in insights.compare_cities(shares, {})}
     assert found == {"Cash-out Refi"}  # purchase gap is only 4% relative; home equity is 1.1 pts
+
+
+def test_clean_loans_types_year_and_flags():
+    raw = pd.DataFrame([{
+        "activity_year": "2024", "lei": "X", "derived_msa-md": "12420", "census_tract": "48453000100",
+        "county_code": "48453", "loan_purpose": "1", "open-end_line_of_credit": "2", "loan_amount": "305000",
+        "interest_rate": "Exempt", "property_value": "400000", "loan_to_value_ratio": "76", "income": "120",
+        "debt_to_income_ratio": "36%-<40%", "loan_term": "360", "occupancy_type": "1",
+        "derived_loan_product_type": "Conventional:First Lien", "lien_status": "1",
+        "tract_to_msa_income_percentage": "75", "tract_minority_population_percent": "55.2",
+    }])
+    loans = hmda.clean_loans(raw)
+    assert loans["year"].iloc[0] == 2024 and loans["product"].iloc[0] == "Purchase"
+    assert pd.isna(loans["interest_rate"].iloc[0]) and loans["open_end"].iloc[0] == False  # noqa: E712
+    assert loans["tract_income_pct"].iloc[0] == 75

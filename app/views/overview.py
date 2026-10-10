@@ -45,7 +45,7 @@ figure = common.choropleth_sequential(
 if value_column == "share":
     figure.update_layout(coloraxis_colorbar=dict(tickformat=".0%"))
 map_right.plotly_chart(figure, width="stretch")
-map_left.caption("Tip: open **Drill-down** to go from a state to its counties, cities and individual loans.")
+map_left.caption("Tip: open **Deep Insights** to go from a state to its counties, cities and individual loans.")
 
 # Mix by state
 st.subheader("Product mix by state")

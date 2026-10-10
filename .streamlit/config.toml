@@ -4,3 +4,11 @@ font = "sans serif"
 
 [server]
 headless = true
+# Fixed port so it matches the SSO redirect URI in secrets.toml.example.
+port = 8599
+# Serves app/static/ at /app/static/ (landmark banner images).
+enableStaticServing = true
+
+[client]
+# Hide the developer "Deploy" toolbar for a cleaner, production look.
+toolbarMode = "minimal"

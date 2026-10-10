@@ -4,11 +4,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
-LOANS_DIR = DATA_DIR / "loans"  # per-county loan-level parquet, fetched on demand
+# Per-county loan-level parquet, fetched on demand. Bump the version when the
+# kept columns change so stale caches are re-downloaded instead of misread.
+LOANS_DIR = DATA_DIR / "loans" / "v2"
 NEWS_CACHE_DIR = DATA_DIR / "news_cache"
 
 HMDA_YEARS = [2022, 2023, 2024]
 LATEST_YEAR = HMDA_YEARS[-1]
+# Vintages scanned for refinance opportunities - the high-rate years.
+REFI_VINTAGES = [2023, 2024]
 HMDA_API = "https://ffiec.cfpb.gov/v2/data-browser-api/view"
 
 # HMDA loan_purpose codes -> dashboard product. HMDA has no "HELOC" purpose;
@@ -56,6 +60,9 @@ STATES = {
 SAMPLE_COUNTIES = [
     "48453",  # Travis, TX (Austin)
     "48491",  # Williamson, TX (Austin suburbs)
+    "48209",  # Hays, TX (Austin metro)
+    "48021",  # Bastrop, TX (Austin metro)
+    "48055",  # Caldwell, TX (Austin metro)
     "48201",  # Harris, TX (Houston)
     "48113",  # Dallas, TX
     "04013",  # Maricopa, AZ (Phoenix)
@@ -63,3 +70,5 @@ SAMPLE_COUNTIES = [
     "37119",  # Mecklenburg, NC (Charlotte)
     "47037",  # Davidson, TN (Nashville)
 ]
+
+DEFAULT_METRO = "12420"  # Austin-Round Rock-San Marcos, TX

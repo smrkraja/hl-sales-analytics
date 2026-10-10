@@ -7,42 +7,110 @@ from hl.config import HMDA_YEARS, LATEST_YEAR, PRODUCTS
 from hl.core import insights, market, metrics
 
 common.require_data()
-st.title("Drill-down: state → county → city → loan")
+st.title("Deep Insights")
 
 states = common.state_products()
 county_agg = common.county_products()
 rates = common.mortgage_rates()
 rate_ctx = market.rate_context(rates) if rates is not None else None
 
-# --- selection ---------------------------------------------------------------
-with st.sidebar:
-    st.header("Drill path")
-    state = st.selectbox("State", sorted(states["state"].unique()), key="dd_state",
-                         index=sorted(states["state"].unique()).index("TX") if "TX" in set(states["state"]) else 0)
-    state_counties = common.counties()[common.counties()["state"] == state].sort_values("county_name")
-    county_options = ["All counties"] + state_counties["county_fips"].tolist()
-    county_fips = st.selectbox("County", county_options, key="dd_county",
-                               format_func=lambda fips: fips if fips == "All counties"
-                               else state_counties.set_index("county_fips").loc[fips, "county_name"])
-    county_fips = None if county_fips == "All counties" else county_fips
+# --- breadcrumb navigation ---------------------------------------------------
+# The drill path lives in session state; breadcrumbs jump back up, the picker goes one level down.
+PATH_KEY = "dd_path"
+LEVELS = ["state", "county", "city"]
+if PATH_KEY not in st.session_state:
+    # Restore from the URL so a refresh or a shared link lands on the same level.
+    st.session_state[PATH_KEY] = {level: st.query_params.get(level) for level in LEVELS}
+path = st.session_state[PATH_KEY]
 
-    city = None
-    loans = None
-    if county_fips:
-        loans = common.load_county_loans_with_feedback(county_fips, common.county_label(county_fips))
-        if loans is not None:
-            city_counts = loans["city"].value_counts()
-            city = st.selectbox("City", ["All cities"] + city_counts.index.tolist(), key="dd_city",
-                                format_func=lambda name: name if name == "All cities" else f"{name} ({city_counts[name]:,})")
-            city = None if city == "All cities" else city
-    st.caption(f"Loan-level detail uses HMDA {LATEST_YEAR}.")
 
-crumbs = ["United States", state]
+def go_to(level_index: int) -> None:
+    """Breadcrumb click: keep the path up to `level_index`, clear everything below it."""
+    for level in LEVELS[level_index:]:
+        path[level] = None
+
+
+def drill_into(level: str, picker_key: str, placeholder: str) -> None:
+    """Picker change: step one level down, then reset the picker for next time."""
+    choice = st.session_state[picker_key]
+    if choice != placeholder:
+        path[level] = choice
+        st.session_state[picker_key] = placeholder
+
+
+state, county_fips, city = path["state"], path["county"], path["city"]
+loans = None
 if county_fips:
-    crumbs.append(common.county_label(county_fips).split(",")[0])
+    loans = common.load_county_loans_with_feedback(county_fips, common.county_label(county_fips))
+    if loans is None:
+        go_to(1)
+        county_fips = city = None
+
+for level in LEVELS:
+    if path[level]:
+        st.query_params[level] = path[level]
+    elif level in st.query_params:
+        del st.query_params[level]
+
+crumbs = [("🇺🇸 United States", 0)]
+if state:
+    crumbs.append((state, 1))
+if county_fips:
+    crumbs.append((common.county_label(county_fips).split(",")[0], 2))
 if city:
-    crumbs.append(city)
-st.markdown(" › ".join(f"**{crumb}**" if index == len(crumbs) - 1 else crumb for index, crumb in enumerate(crumbs)))
+    crumbs.append((city, 3))
+
+st.html(
+    "<style>.st-key-dd_breadcrumbs { background: rgba(42,120,214,0.06); border: 1px solid rgba(42,120,214,0.18);"
+    " border-radius: 10px; padding: 4px 14px; }"
+    ".st-key-dd_breadcrumbs p { margin: 0; line-height: 1; }"
+    ".st-key-dd_breadcrumbs .hl-sep { color: #898781; font-size: 1.1rem; }</style>"
+)
+with st.container(key="dd_breadcrumbs", horizontal=True, vertical_alignment="center", gap="small"):
+    for position, (label, level_index) in enumerate(crumbs):
+        is_current = position == len(crumbs) - 1
+        if is_current and not city:
+            st.markdown(f"**{label}**")
+        else:
+            st.button(label, key=f"dd_crumb_{level_index}", type="tertiary", on_click=go_to, args=(level_index,),
+                      disabled=is_current, help=None if is_current else f"Back to {label}")
+        if not is_current or city:
+            st.markdown("<span class='hl-sep'>›</span>", unsafe_allow_html=True)
+    if city:
+        st.markdown(f"**📄 Loans ({(loans['city'] == city).sum():,})**")
+    else:
+        # Next level down, offered right where the trail ends.
+        if not state:
+            next_level, options = "state", sorted(states["state"].unique())
+            label_for = {abbr: abbr for abbr in options}
+        elif not county_fips:
+            in_state = common.counties()[common.counties()["state"] == state].sort_values("county_name")
+            next_level, options = "county", in_state["county_fips"].tolist()
+            label_for = dict(zip(in_state["county_fips"], in_state["county_name"]))
+        else:
+            city_counts = loans["city"].value_counts()
+            next_level, options = "city", city_counts.index.tolist()
+            label_for = {name: f"{name} ({count:,} loans)" for name, count in city_counts.items()}
+        placeholder = f"Drill into a {next_level}…"
+        picker_key = f"dd_pick_{next_level}"
+        st.selectbox(f"Drill into a {next_level}", [placeholder, *options], key=picker_key,
+                     format_func=lambda option: label_for.get(option, option), label_visibility="collapsed",
+                     on_change=drill_into, args=(next_level, picker_key, placeholder), width=320)
+
+st.caption(f"Loan-level detail uses HMDA {LATEST_YEAR}. Click any step in the trail to go back up.")
+
+# --- NATIONAL level: pick a state ---------------------------------------------
+if not state:
+    current = states[states["year"] == LATEST_YEAR]
+    table = (current.pivot_table(index="state", columns="product", values="loans", aggfunc="sum", fill_value=0)
+             .reindex(columns=PRODUCTS, fill_value=0))
+    table["Total"] = table.sum(axis=1)
+    st.subheader(f"Originations by state, {LATEST_YEAR}")
+    st.dataframe(table.sort_values("Total", ascending=False), width="stretch", height=520,
+                 column_config={column: st.column_config.NumberColumn(format="localized")
+                                for column in [*PRODUCTS, "Total"]})
+    common.data_footnote()
+    st.stop()
 
 national_shares = metrics.mix_shares(states[states["year"] == LATEST_YEAR])
 state_rows = states[states["state"] == state]
@@ -64,7 +132,7 @@ def kpi_row(frame: pd.DataFrame, has_years: bool = True) -> None:
     columns[2].metric("Avg loan", common.money(volume_now / loans_now) if loans_now else "-")
     shares = metrics.mix_shares(current)
     top = max(shares, key=shares.get)
-    columns[3].metric("Top product", f"{top} ({shares[top]:.0%})")
+    columns[3].metric(f"Top product · {shares[top]:.0%} of loans", top)
 
 
 def comparison_mix(rows: dict[str, dict]) -> pd.DataFrame:
