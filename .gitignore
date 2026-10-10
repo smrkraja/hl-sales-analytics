@@ -1,0 +1,17 @@
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.pem
+*.key
+
+# Local environment and caches
+.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+
+# Downloaded data (rebuilt by `python -m hl.etl.run`) and browser test artifacts
+data/
+.playwright-mcp/
