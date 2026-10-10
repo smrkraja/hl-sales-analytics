@@ -32,7 +32,7 @@ Optional `.env` settings (see `.env.example`): `ANTHROPIC_API_KEY` enables the C
 Every page sits behind company SSO (Streamlit's built-in OIDC: Microsoft Entra ID, Okta or Google). Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` (gitignored), register a web app with your identity provider using the redirect URI `http://localhost:8599/oauth2callback`, and fill in the client ID/secret.
 
 - **Fails closed:** with no `[auth]` section the dashboard stays locked. For local development only, set `HL_ALLOW_ANONYMOUS=1` in `.env`; the banner then shows a DEV MODE badge.
-- **Banner** (every page): signed-in user's name, email and initials, a **Log out** button, and "Signed in from <city>" with the sign-in time in the user's timezone.
+- **Banner** (every page): signed-in user's name, email and profile photo (provider photo → your gitignored `app/static/avatars/me.jpg` in dev mode → stock headshot), a **Log out** button, and "Signed in from <city>" with the sign-in time in the user's timezone.
 - **Location** comes from the visitor's IP (the `X-Forwarded-For` header when behind a proxy) via ipapi.co, with ipwho.is as a fallback. Private/local IPs are never sent out and show as "Local network". It's approximate and for display only, never for access control.
 
 ## Pages

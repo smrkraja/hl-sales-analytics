@@ -1,7 +1,7 @@
 """City -> landmark photo for the sign-in banner.
 
-To add a city: put a wide image in app/static/landmarks/ (credit it in the README
-there) and add an entry keyed by the lower-case city name.
+To add a city: put a wide image in app/static/landmarks/, record its source and
+license in the README there, and add an entry keyed by the lower-case city name.
 """
 from dataclasses import dataclass
 
@@ -10,7 +10,6 @@ from dataclasses import dataclass
 class Landmark:
     name: str
     image: str            # path under app/static/
-    credit: str
     focus: str = "center"  # CSS background-position, to keep the landmark in frame
 
 
@@ -18,7 +17,6 @@ LANDMARKS = {
     "san francisco": Landmark(
         name="Golden Gate Bridge",
         image="landmarks/san-francisco.jpg",
-        credit="Photo: Umer Sayyam (CC0)",
         focus="center 55%",
     ),
 }

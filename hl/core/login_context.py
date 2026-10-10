@@ -63,6 +63,15 @@ def display_name(user: dict) -> str:
     return user.get("name") or user.get("preferred_username") or user.get("email") or "Signed-in user"
 
 
+def avatar_url(user: dict) -> str | None:
+    """Profile photo from the identity provider's `picture` claim (Google/Okta send one;
+    Entra usually doesn't). Only https URLs are accepted - never data:/javascript: or http."""
+    picture = user.get("picture")
+    if isinstance(picture, str) and picture.startswith("https://"):
+        return picture
+    return None
+
+
 def initials(name: str) -> str:
     letters = [part[0] for part in name.replace("@", " ").split() if part and part[0].isalpha()]
     return "".join(letters[:2]).upper() or "?"

@@ -15,3 +15,6 @@ __pycache__/
 # Downloaded data (rebuilt by `python -m hl.etl.run`) and browser test artifacts
 data/
 .playwright-mcp/
+
+# Personal profile photo for local dev mode - never published
+app/static/avatars/me.*

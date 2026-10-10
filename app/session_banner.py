@@ -1,6 +1,7 @@
 """Sign-in gate and the top-of-page banner shown on every page."""
 import html
 import os
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import streamlit as st
@@ -8,6 +9,9 @@ import streamlit as st
 from hl.core import landmarks, login_context
 
 APP_NAME = "Home Lending Sales Analytics"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+DEFAULT_AVATAR = "avatars/default.jpg"           # stock headshot (CC0) when no other photo exists
+LOCAL_AVATARS = ["avatars/me.jpg", "avatars/me.png"]  # gitignored personal photo, dev mode only
 TAGLINE = "Market intelligence for home lending advisers"
 
 BANNER_CSS = """
@@ -31,13 +35,12 @@ BANNER_CSS = """
 .hl-title { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.2px; line-height: 1.2; }
 .hl-tagline { font-size: 0.85rem; opacity: 0.8; }
 .hl-user { display: flex; align-items: center; gap: 12px; justify-content: flex-end; text-align: right; }
-.hl-avatar {
-  width: 38px; height: 38px; border-radius: 50%; background: #ffffff; color: #0d366b !important;
-  display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0;
+.hl-photo {
+  width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  border: 2px solid #ffffff; box-shadow: 0 1px 4px rgba(0,0,0,0.35); background: #cde2fb;
 }
 .hl-name { font-weight: 600; font-size: 0.95rem; line-height: 1.2; }
 .hl-meta { font-size: 0.78rem; opacity: 0.85; line-height: 1.35; }
-.hl-credit { font-size: 0.65rem; opacity: 0.7; margin-top: 2px; }
 .hl-dev { background: #fab219; color: #0b0b0b !important; border-radius: 6px; padding: 1px 6px; font-weight: 600; }
 .st-key-hl_banner button {
   background: transparent; color: #ffffff; border: 1px solid rgba(255,255,255,0.6);
@@ -59,8 +62,24 @@ def _landmark_css(landmark: landmarks.Landmark | None) -> str:
             f"background-size: cover; background-position: {landmark.focus}; min-height: 150px; "
             f"justify-content: center; }}"
             f".st-key-hl_banner .hl-title, .st-key-hl_banner .hl-tagline, .st-key-hl_banner .hl-name, "
-            f".st-key-hl_banner .hl-meta, .st-key-hl_banner .hl-credit "
+            f".st-key-hl_banner .hl-meta "
             f"{{ text-shadow: 0 1px 3px rgba(0,0,0,0.55); }}</style>")
+
+
+def _avatar_for(user: dict, dev_mode: bool) -> str:
+    """Identity-provider photo first; in dev mode a local personal photo; else the stock headshot.
+
+    The local photo is dev-mode only: on a shared server it would otherwise appear for
+    every user whose provider sends no picture.
+    """
+    provider_photo = login_context.avatar_url(user)
+    if provider_photo:
+        return provider_photo
+    if dev_mode:
+        for candidate in LOCAL_AVATARS:
+            if (STATIC_DIR / candidate).is_file():
+                return f"app/static/{candidate}"
+    return f"app/static/{DEFAULT_AVATAR}"
 
 
 def _auth_configured() -> bool:
@@ -153,13 +172,18 @@ def require_login_and_render_banner() -> None:
     signed_in = _local_time(_signed_in_at(user))
     ip_text = f" ({ip})" if ip and location == login_context.LOCAL_LABEL else ""
     dev_badge = " <span class='hl-dev'>DEV MODE</span>" if dev_mode else ""
+    photo = _avatar_for(user, dev_mode)
     landmark = landmarks.landmark_for(location)
-    credit = (f"<div class='hl-credit'>{html.escape(landmark.name)} · {html.escape(landmark.credit)}</div>"
-              if landmark else "")
 
     st.markdown(BANNER_CSS + _landmark_css(landmark), unsafe_allow_html=True)
     with st.container(key="hl_banner"):
-        brand, who, action = st.columns([4, 5, 1], vertical_alignment="center")
+        # Only reserve a column for Log out when there is a session to end, so the
+        # user details sit flush against the right edge in dev mode.
+        if dev_mode:
+            brand, who = st.columns([4, 6], vertical_alignment="center")
+            action = None
+        else:
+            brand, who, action = st.columns([4, 5, 1], vertical_alignment="center")
         brand.markdown(_brand_html(), unsafe_allow_html=True)
         # Everything from the identity provider or the network is escaped before it hits HTML.
         who.markdown(
@@ -167,10 +191,12 @@ def require_login_and_render_banner() -> None:
             f"<div class='hl-name'>{html.escape(name)}{dev_badge}</div>"
             f"<div class='hl-meta'>{html.escape(email)}</div>"
             f"<div class='hl-meta'>📍 Signed in from {html.escape(location + ip_text)}</div>"
-            f"<div class='hl-meta'>🕒 {html.escape(signed_in)}</div>{credit}"
-            f"</div><div class='hl-avatar'>{html.escape(login_context.initials(name))}</div></div>",
+            f"<div class='hl-meta'>🕒 {html.escape(signed_in)}</div>"
+            f"</div><img class='hl-photo' src='{html.escape(photo, quote=True)}' "
+            f"alt='{html.escape(name, quote=True)}' title='{html.escape(name, quote=True)}'"
+            f" referrerpolicy='no-referrer'></div>",
             unsafe_allow_html=True,
         )
-        if not dev_mode and action.button("Log out", key="hl_logout", width="stretch"):
+        if action is not None and action.button("Log out", key="hl_logout", width="stretch"):
             st.session_state.clear()
             st.logout()

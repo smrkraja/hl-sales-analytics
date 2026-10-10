@@ -90,3 +90,20 @@ def test_every_landmark_image_exists():
     static = Path(__file__).resolve().parent.parent / "app" / "static"
     for city, landmark in landmarks.LANDMARKS.items():
         assert (static / landmark.image).is_file(), f"missing image for {city}"
+
+
+
+@pytest.mark.parametrize("user, expected", [
+    ({"picture": "https://lh3.googleusercontent.com/a/abc"}, "https://lh3.googleusercontent.com/a/abc"),
+    ({"picture": "http://insecure.example/p.jpg"}, None),
+    ({"picture": "javascript:alert(1)"}, None),
+    ({"picture": "data:image/svg+xml;base64,AAAA"}, None),
+    ({}, None),
+])
+def test_avatar_url_accepts_only_https(user, expected):
+    assert login_context.avatar_url(user) == expected
+
+
+def test_default_avatar_is_bundled():
+    from pathlib import Path
+    assert (Path(__file__).resolve().parent.parent / "app" / "static" / "avatars" / "default.jpg").is_file()
